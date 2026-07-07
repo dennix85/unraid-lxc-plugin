@@ -1,0 +1,133 @@
+name: Build lxc package
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ master ]
+    paths:
+      - 'source/**'
+      - 'lxc.plg'
+
+jobs:
+  build:
+    # Real Slackware userland (native pkgtools/makepkg), matching the actual
+    # Unraid target far more closely than a plain Ubuntu runner would.
+    runs-on: ubuntu-latest
+    container:
+      image: andy5995/slackware-build-essential:15.0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Trust the workspace directory (container runs as different UID)
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Stage plugin files at the absolute path makepkg-unraid.sh expects
+        run: |
+          mkdir -p /usr/local/emhttp/plugins
+          rm -rf /usr/local/emhttp/plugins/lxc
+          cp -R "$GITHUB_WORKSPACE/source/usr/local/emhttp/plugins/lxc" /usr/local/emhttp/plugins/lxc
+
+      - name: Build package
+        run: bash "$GITHUB_WORKSPACE/source/makepkg-unraid.sh"
+
+      - name: Collect build output into packages/
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/packages"
+          found=0
+          for d in /tmp/lxc_*; do
+            [ -d "$d" ] || continue
+            for f in "$d"/*.txz "$d"/*.txz.md5; do
+              [ -f "$f" ] && cp "$f" "$GITHUB_WORKSPACE/packages/" && found=1
+            done
+          done
+          if [ "$found" -ne 1 ]; then
+            echo "ERROR: no .txz/.md5 produced by makepkg-unraid.sh" >&2
+            exit 1
+          fi
+          ls -la "$GITHUB_WORKSPACE/packages"
+
+      - name: Bump version in lxc.plg
+        run: |
+          VERSION=$(date +"%Y.%m.%d")
+          sed -i -E 's#(<!ENTITY version[[:space:]]+")[^"]*(")#\1'"$VERSION"'\2#' "$GITHUB_WORKSPACE/lxc.plg"
+          grep 'ENTITY version' "$GITHUB_WORKSPACE/lxc.plg"
+
+      - name: Upload built package as CI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lxc-package
+          path: |
+            packages/*.txz
+            packages/*.md5
+          if-no-files-found: error
+
+      - name: Upload updated .plg
+        uses: actions/upload-artifact@v4
+        with:
+          name: lxc-plg
+          path: lxc.plg
+
+  commit:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download built package
+        uses: actions/download-artifact@v4
+        with:
+          name: lxc-package
+          path: packages
+
+      - name: Download updated .plg
+        uses: actions/download-artifact@v4
+        with:
+          name: lxc-plg
+          path: .
+
+      - name: Commit new package
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add packages/ lxc.plg
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git commit -m "Automated build: lxc package $(date +%Y.%m.%d)"
+
+          # Same race-condition handling as the gpustat-unraid pipeline:
+          # retry with rebase, and if the conflict is confined to the
+          # generated packages/ artifacts (two runs picking the same
+          # version-dated filename), keep this run's build and continue.
+          for i in 1 2 3 4 5; do
+            if git push; then
+              exit 0
+            fi
+            echo "Push rejected (attempt $i) -- fetching and rebasing..."
+            git fetch origin master
+            if ! git rebase origin/master; then
+              if git diff --name-only --diff-filter=U | grep -qv '^packages/'; then
+                echo "Conflict outside packages/ -- can't auto-resolve."
+                git rebase --abort
+                exit 1
+              fi
+              echo "Conflict is on generated packages/ artifacts -- keeping this run's build."
+              git checkout --ours -- packages/ 2>/dev/null || true
+              git add packages/
+              if ! git rebase --continue; then
+                echo "Could not auto-resolve rebase conflict."
+                git rebase --abort
+                exit 1
+              fi
+            fi
+          done
+
+          echo "Failed to push after retries."
+          exit 1
