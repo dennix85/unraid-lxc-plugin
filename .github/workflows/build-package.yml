@@ -47,11 +47,16 @@ jobs:
           fi
           ls -la "$GITHUB_WORKSPACE/packages"
 
-      - name: Bump version in lxc.plg
+      - name: Bump version and md5 in lxc.plg
         run: |
           VERSION=$(date +"%Y.%m.%d")
           sed -i -E 's#(<!ENTITY version[[:space:]]+")[^"]*(")#\1'"$VERSION"'\2#' "$GITHUB_WORKSPACE/lxc.plg"
-          grep 'ENTITY version' "$GITHUB_WORKSPACE/lxc.plg"
+
+          MD5FILE=$(ls "$GITHUB_WORKSPACE"/packages/*.txz.md5 | head -n1)
+          MD5VAL=$(awk '{print $1}' "$MD5FILE")
+          sed -i -E 's#(<!ENTITY md5[[:space:]]+")[^"]*(")#\1'"$MD5VAL"'\2#' "$GITHUB_WORKSPACE/lxc.plg"
+
+          grep -E 'ENTITY version|ENTITY md5' "$GITHUB_WORKSPACE/lxc.plg"
 
       - name: Upload built package as CI artifact
         uses: actions/upload-artifact@v4
