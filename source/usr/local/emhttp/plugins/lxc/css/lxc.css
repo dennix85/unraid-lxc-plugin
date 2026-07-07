@@ -100,9 +100,15 @@ h3.startArray, h2.noContainers {
     text-align: center;
 }
 
+body.dark {
+    min-height: 100vh !important;
+}
+
 .show_lxc {
     display:block;
     top: unset !important;
+    max-height: none !important;
+    overflow: visible !important;
 }
 
 .spinner {
