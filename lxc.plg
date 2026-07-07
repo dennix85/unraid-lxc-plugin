@@ -1,7 +1,7 @@
 <?xml version='1.0' standalone='yes'?>
 <!DOCTYPE PLUGIN [
   <!ENTITY name      "lxc">
-  <!ENTITY author    "ich777">
+  <!ENTITY author    "dennix85">
   <!ENTITY version   "2026.07.07">
   <!ENTITY launch    "Settings/LXCSettings">
   <!ENTITY gitURL    "https://github.com/&author;/unraid-&name;-plugin/raw/master">
@@ -14,6 +14,10 @@
 <PLUGIN  name="&name;" author="&author;" version="&version;" launch="&launch;" pluginURL="&pluginURL;" min="6.10.0" support="https://forums.unraid.net/topic/123935-plugin-lxc-plugin/">
 
 <CHANGES>
+
+###2026.07.07
+- Fix page body collapsing to a fraction of the viewport height on the LXC Containers page, causing dropdown menus with more items to scroll internally instead of expanding into available space
+- Remove artificial height cap on the container action dropdown menu
 
 ###2025.05.20
 - Fix an issue deleting old backups with lxc-autobackup was not working correctly
