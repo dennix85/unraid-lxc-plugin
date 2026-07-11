@@ -52,7 +52,12 @@ jobs:
           VERSION=$(date +"%Y.%m.%d")
           sed -i -E 's#(<!ENTITY version[[:space:]]+")[^"]*(")#\1'"$VERSION"'\2#' "$GITHUB_WORKSPACE/lxc.plg"
 
-          MD5FILE=$(ls "$GITHUB_WORKSPACE"/packages/*.txz.md5 | head -n1)
+          MD5FILE="$GITHUB_WORKSPACE/packages/lxc-${VERSION}.txz.md5"
+          if [ ! -f "$MD5FILE" ]; then
+            echo "ERROR: expected $MD5FILE not found -- collect step may have picked up the wrong file." >&2
+            ls -la "$GITHUB_WORKSPACE/packages/" >&2
+            exit 1
+          fi
           MD5VAL=$(awk '{print $1}' "$MD5FILE")
           sed -i -E 's#(<!ENTITY md5[[:space:]]+")[^"]*(")#\1'"$MD5VAL"'\2#' "$GITHUB_WORKSPACE/lxc.plg"
 
