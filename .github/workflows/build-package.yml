@@ -31,30 +31,53 @@ jobs:
       - name: Build package
         run: bash "$GITHUB_WORKSPACE/source/makepkg-unraid.sh"
 
-      - name: Collect build output into packages/
+      - name: Collect build output into packages/ (with same-day suffix handling)
         run: |
           mkdir -p "$GITHUB_WORKSPACE/packages"
-          found=0
+          VERSION=$(date +"%Y.%m.%d")
+
+          # makepkg-unraid.sh always names its output lxc-<date>.txz with no
+          # collision handling of its own. Find what it actually produced.
+          SRC_TXZ=""
+          SRC_MD5=""
           for d in /tmp/lxc_*; do
             [ -d "$d" ] || continue
-            for f in "$d"/*.txz "$d"/*.txz.md5; do
-              [ -f "$f" ] && cp "$f" "$GITHUB_WORKSPACE/packages/" && found=1
+            for f in "$d"/*.txz; do
+              [ -f "$f" ] && SRC_TXZ="$f"
+            done
+            for f in "$d"/*.txz.md5; do
+              [ -f "$f" ] && SRC_MD5="$f"
             done
           done
-          if [ "$found" -ne 1 ]; then
+          if [ -z "$SRC_TXZ" ] || [ -z "$SRC_MD5" ]; then
             echo "ERROR: no .txz/.md5 produced by makepkg-unraid.sh" >&2
             exit 1
           fi
+
+          # Same a/b/c same-day suffix scheme as gpustat-unraid's mkpkg --
+          # avoids silently overwriting an already-committed same-day build.
+          FINAL_VERSION="$VERSION"
+          if [ -f "$GITHUB_WORKSPACE/packages/lxc-${FINAL_VERSION}.txz" ]; then
+            for x in a b c d e f g h i j k l m n o p q r s t u v w x y z; do
+              if [ ! -f "$GITHUB_WORKSPACE/packages/lxc-${VERSION}${x}.txz" ]; then
+                FINAL_VERSION="${VERSION}${x}"
+                break
+              fi
+            done
+          fi
+
+          cp "$SRC_TXZ" "$GITHUB_WORKSPACE/packages/lxc-${FINAL_VERSION}.txz"
+          cp "$SRC_MD5" "$GITHUB_WORKSPACE/packages/lxc-${FINAL_VERSION}.txz.md5"
+          echo "FINAL_VERSION=$FINAL_VERSION" >> "$GITHUB_ENV"
           ls -la "$GITHUB_WORKSPACE/packages"
 
       - name: Bump version and md5 in lxc.plg
         run: |
-          VERSION=$(date +"%Y.%m.%d")
-          sed -i -E 's#(<!ENTITY version[[:space:]]+")[^"]*(")#\1'"$VERSION"'\2#' "$GITHUB_WORKSPACE/lxc.plg"
+          sed -i -E 's#(<!ENTITY version[[:space:]]+")[^"]*(")#\1'"$FINAL_VERSION"'\2#' "$GITHUB_WORKSPACE/lxc.plg"
 
-          MD5FILE="$GITHUB_WORKSPACE/packages/lxc-${VERSION}.txz.md5"
+          MD5FILE="$GITHUB_WORKSPACE/packages/lxc-${FINAL_VERSION}.txz.md5"
           if [ ! -f "$MD5FILE" ]; then
-            echo "ERROR: expected $MD5FILE not found -- collect step may have picked up the wrong file." >&2
+            echo "ERROR: expected $MD5FILE not found." >&2
             ls -la "$GITHUB_WORKSPACE/packages/" >&2
             exit 1
           fi
