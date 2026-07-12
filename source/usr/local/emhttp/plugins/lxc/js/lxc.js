@@ -155,7 +155,23 @@ function showStatus(action, id, title, text) {
 
 function showDropdown(contName) {
   setTimeout(function() {
-    document.getElementById("dropdown_" + contName).classList.toggle("show_lxc");
+    var menu = document.getElementById("dropdown_" + contName);
+    menu.classList.toggle("show_lxc");
+
+    // The menu is absolutely positioned, so it doesn't cause the page to
+    // grow or scroll to contain it -- if it's opened near the bottom of
+    // the viewport, part of it renders below the visible window with no
+    // way to scroll into it. Shift it upward by exactly the overflow
+    // amount so the whole menu stays on-screen.
+    if (menu.classList.contains("show_lxc")) {
+      menu.style.top = "";
+      var rect = menu.getBoundingClientRect();
+      var overflow = rect.bottom - window.innerHeight;
+      if (overflow > 0) {
+        var currentTop = menu.offsetTop;
+        menu.style.top = (currentTop - overflow - 10) + "px";
+      }
+    }
   }, 100);
 }
 
@@ -357,6 +373,22 @@ function showSpinner() {
 }
 
 $(function() {
+  // #displaybox naturally sizes to its content and can end up far shorter
+  // than the visible window. Measure its actual position at runtime and
+  // stretch it to fill the rest of the viewport -- no guessed offset.
+  function fillDisplaybox() {
+    var box = document.getElementById("displaybox");
+    if (!box) return;
+    box.style.minHeight = "";
+    var top = box.getBoundingClientRect().top;
+    var available = window.innerHeight - top;
+    if (available > box.offsetHeight) {
+      box.style.minHeight = available + "px";
+    }
+  }
+  fillDisplaybox();
+  $(window).on("resize", fillDisplaybox);
+
   // Disables all spaces in input fields
   $('.forbidSpace').on({
     keydown: function (e) {
