@@ -1,143 +1,771 @@
-name: Build lxc package
+<?xml version='1.0' standalone='yes'?>
+<!DOCTYPE PLUGIN [
+  <!ENTITY name      "lxc">
+  <!ENTITY author    "dennix85">
+  <!ENTITY version   "2026.07.07">
+  <!ENTITY launch    "Settings/LXCSettings">
+  <!ENTITY gitURL    "https://github.com/&author;/unraid-&name;-plugin/raw/master">
+  <!ENTITY pluginURL "&gitURL;/&name;.plg">
+  <!ENTITY md5       "15d369fe8d27c1bd582dd54ac1d8c5a4">
+  <!ENTITY plugin    "/boot/config/plugins/&name;">
+  <!ENTITY emhttp    "/usr/local/emhttp/plugins/&name;">
+]>
 
-on:
-  workflow_dispatch:
-  push:
-    branches: [ master ]
-    paths:
-      - 'source/**'
-      - 'lxc.plg'
+<PLUGIN  name="&name;" author="&author;" version="&version;" launch="&launch;" pluginURL="&pluginURL;" min="6.10.0" support="https://forums.unraid.net/topic/123935-plugin-lxc-plugin/">
 
-jobs:
-  build:
-    # Real Slackware userland (native pkgtools/makepkg), matching the actual
-    # Unraid target far more closely than a plain Ubuntu runner would.
-    runs-on: ubuntu-latest
-    container:
-      image: andy5995/slackware-build-essential:15.0
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+<CHANGES>
 
-      - name: Trust the workspace directory (container runs as different UID)
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+###2026.07.11
+- Fix container action dropdown menu scrolling internally instead of expanding to show all available options
 
-      - name: Stage plugin files at the absolute path makepkg-unraid.sh expects
-        run: |
-          mkdir -p /usr/local/emhttp/plugins
-          rm -rf /usr/local/emhttp/plugins/lxc
-          cp -R "$GITHUB_WORKSPACE/source/usr/local/emhttp/plugins/lxc" /usr/local/emhttp/plugins/lxc
+###2025.05.20
+- Fix an issue deleting old backups with lxc-autobackup was not working correctly
 
-      - name: Build package
-        run: bash "$GITHUB_WORKSPACE/source/makepkg-unraid.sh"
+###2025.05.20
+- Minor bugfixes
+- Formatting fixes
+- Code cleanup
 
-      - name: Collect build output into packages/
-        run: |
-          mkdir -p "$GITHUB_WORKSPACE/packages"
-          found=0
-          for d in /tmp/lxc_*; do
-            [ -d "$d" ] || continue
-            for f in "$d"/*.txz "$d"/*.txz.md5; do
-              [ -f "$f" ] && cp "$f" "$GITHUB_WORKSPACE/packages/" && found=1
-            done
-          done
-          if [ "$found" -ne 1 ]; then
-            echo "ERROR: no .txz/.md5 produced by makepkg-unraid.sh" >&2
-            exit 1
-          fi
-          ls -la "$GITHUB_WORKSPACE/packages"
+###2025.05.19
+- Fix bug that shows the LXC page when LXC is disabled
+- Make sure to honor the container order on the Snapshot and Backup pages
 
-      - name: Bump version and md5 in lxc.plg
-        run: |
-          VERSION=$(date +"%Y.%m.%d")
-          sed -i -E 's#(<!ENTITY version[[:space:]]+")[^"]*(")#\1'"$VERSION"'\2#' "$GITHUB_WORKSPACE/lxc.plg"
+###2025.04.18a
+- Add the ability to sort containers on the LXC page by adding `#container_order=` followed by a number to the container config
 
-          MD5FILE="$GITHUB_WORKSPACE/packages/lxc-${VERSION}.txz.md5"
-          if [ ! -f "$MD5FILE" ]; then
-            echo "ERROR: expected $MD5FILE not found -- collect step may have picked up the wrong file." >&2
-            ls -la "$GITHUB_WORKSPACE/packages/" >&2
-            exit 1
-          fi
-          MD5VAL=$(awk '{print $1}' "$MD5FILE")
-          sed -i -E 's#(<!ENTITY md5[[:space:]]+")[^"]*(")#\1'"$MD5VAL"'\2#' "$GITHUB_WORKSPACE/lxc.plg"
+###2025.04.18
+- Fix for to small window when deploying a container from a template
 
-          grep -E 'ENTITY version|ENTITY md5' "$GITHUB_WORKSPACE/lxc.plg"
+###2025.04.01
+- Bugfix for sorting on Backups tab not being correct
 
-      - name: Upload built package as CI artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: lxc-package
-          path: |
-            packages/*.txz
-            packages/*.md5
-          if-no-files-found: error
+###2025.03.29
+- Bugfix for commenting memory limits in config not showing up correctly in WebUI - thank you mainfrezzer for reporting
 
-      - name: Upload updated .plg
-        uses: actions/upload-artifact@v4
-        with:
-          name: lxc-plg
-          path: lxc.plg
+###2025.03.25a
+- Bugfix for themes other than white not showing configuration correctly
 
-  commit:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+###2025.03.25
+- Add Open Terminal button when creating a new container or creating a container from template
+- Change Show Config to Show/Edit Config and make it possible to edit the container configuration directly in the WebUI
 
-      - name: Download built package
-        uses: actions/download-artifact@v4
-        with:
-          name: lxc-package
-          path: packages
+###2025.02.03
+- Include custom container icons in backups
 
-      - name: Download updated .plg
-        uses: actions/download-artifact@v4
-        with:
-          name: lxc-plg
-          path: .
+###2025.01.21
+- Fix for selected network adapter possibly not showing correctly on Settings page
+- Fix for Backup page showing possible false backups if directory was renamed manually
 
-      - name: Commit new package
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add packages/ lxc.plg
-          if git diff --cached --quiet; then
-            echo "No changes to commit."
-            exit 0
-          fi
-          git commit -m "Automated build: lxc package $(date +%Y.%m.%d)"
+###2025.01.15
+- Fix php error on settings page
 
-          # Same race-condition handling as the gpustat-unraid pipeline:
-          # retry with rebase, and if the conflict is confined to the
-          # generated packages/ artifacts (two runs picking the same
-          # version-dated filename), keep this run's build and continue.
-          for i in 1 2 3 4 5; do
-            if git push; then
-              exit 0
-            fi
-            echo "Push rejected (attempt $i) -- fetching and rebasing..."
-            git fetch origin master
-            if ! git rebase origin/master; then
-              if git diff --name-only --diff-filter=U | grep -qv '^packages/'; then
-                echo "Conflict outside packages/ -- can't auto-resolve."
-                git rebase --abort
-                exit 1
-              fi
-              echo "Conflict is on generated packages/ artifacts -- keeping this run's build."
-              git checkout --ours -- packages/ 2>/dev/null || true
-              git add packages/
-              if ! git rebase --continue; then
-                echo "Could not auto-resolve rebase conflict."
-                git rebase --abort
-                exit 1
-              fi
-            fi
-          done
+###2025.01.09
+- Fix an issue with pattern matching on LXCAddTemplate page which prevented containers from being deployed
 
-          echo "Failed to push after retries."
-          exit 1
+###2025.01.03
+- Fixes for displaying memory incorrect on LXC page when using 'lxc.cgroup2.memory.max' in config
+
+###2025.01.02
+- Fixes and improvements for various pattern matching on plugin pages
+
+###2024.12.23
+- Fix issue where empty variables in the config file are read incorrectly
+
+###2024.12.14
+- Fix for false positive messages about external links
+
+###2024.11.21
+- Make sure to open WebUI from containers as localURL
+
+###2024.10.29
+- Fix WebUI on Dashboard not working properly for [IP] links
+
+###2024.10.22
+- Fix PHP warnings on Dashboard
+
+###2024.10.01
+- Allow slashes in LXC Container URL
+
+###2024.09.05
+- Change icon for LXC for Azure and Grey theme
+- Change icon on LXC page for White and Black theme
+- Change icon on Settings page
+
+###2024.08.25
+- Fix table widths on LXC, Snapshot and Backup page
+
+###2024.08.17
+- Overhaul description from plugin
+- Minor bugfixes
+- Add LXC startup check
+- Remove warning from template
+
+###2024.08.13
+- Fix for Dashboard tile not showing up on Unraid version 6.12.11
+
+###2024.08.08
+- Fix PHP warnings when creating containers from a template
+
+###2024.08.06
+- Fix PHP warnings
+
+###2024.07.17a
+- Minor bugfix for LXC plugin file
+
+###2024.07.17
+- Change name in Legend on Dashboard to LXC (unRAID 7.0.0+)
+
+###2024.06.24
+- Fix bug in function getVariables where a second equal sign in the variable causes a parsing issue
+- Fix bug in LXCAddTemplate where some entries where not correctly marked as required
+
+###2024.06.05
+- Minor visual improvement to LXC page
+
+###2024.05.21
+- Added settings entry to enable/disable dynamic stats updates from LXC Containers on LXC page
+- Minor bugfix for LXC Stats Workers
+- Changed how LXC Stats Workers are started and kept alive
+- Added TiB readouts as the maximum value for Memory usage and Network RX/TX on LXC page
+
+###2024.05.16
+- Fix Container Index drop downs only showing up every second page reload from Add Container page
+- Fix for entry WebUI in Container drop down not showing up when visiting the LXC page
+- Don't reload LXC page after closing Container configuration with the Done button
+- Minor Bugfixes for Add Container page
+
+###2024.05.14
+- Minor change in LXC Container Images index download function
+- Make sure that container statistics are properly displayed after a reboot
+
+###2024.05.13
+- Make sure that LXC Container Images index is going through Proxy if a Proxy is used/enabled
+
+###2024.04.23
+- Display system memory or set system memory if limited with lxc.cgroup.memory.limit_in_bytes on LXC page
+- Minor visual changes and tweaks
+
+###2024.04.21
+- Revamped how CPU Load and other dynamic statistics are gathered on LXC page
+
+###2024.04.18a
+- Fix bug where some Distributions stop LXC page from working properly because of CPU Load
+
+###2024.04.18
+- Added experimental CPU Load column to LXC page
+
+###2024.04.07
+- Added Installed LXC Version to main settings page
+- LXC Settings Update page added. Allows to check manually for LXC package updates from within the WebGUI
+
+###2024.03.19a
+- Workaround for destroying NixOS based containers in combination with Directory Backing Storage Type because of immutable bit set on a directory
+
+###2024.03.19
+- Bugfix for LXC not working properly after first start
+- Bugfix for Dashboard page
+
+###2024.03.14
+- Bugfix for restoring a Backup through lxc-autobackup where the paths where not correctly populated when using BTRFS or ZFS as Backing Storage type in the config file
+
+###2024.01.03
+- Fix CSS issue for line-height
+
+###2023.12.23
+- Fix php warnings and errors
+- Fix for buttons not showing correctly on Snaphsot/Backup page
+
+###2023.12.15
+- Compatibility update for LXC RAM usage
+
+###2023.12.14
+- Add LXC RAM usage
+
+###2023.11.03
+- Bugfix for taking snapshots from the GUI to mount datasets if ZFS backing storage type is used
+- Bugfix for lxc-autsnapshot to mount datasets if ZFS backing storage type is used
+- Bugfix for lxc-autobackup where backups are not properly created if ZFS backing storage type in combination with From Snapshot enabled is used
+- Fix typo
+
+###2023.10.29
+- Fix for ZFS backing storage type not displaying files in rootfs folder from container (this applies only to newly created containers, existing containers will be not changed)
+
+###2023.10.26
+- Assign fixed width to dynamic updated colums on LXC page to prevent constant resizing
+
+###2023.10.25
+- Add Uptime indicator to LXC page
+- Few minor visual changes to LXC page
+
+###2023.10.23
+- Ensure plugin compatibility with unRAID 6.13
+- Remove custom icons on container removal
+- Minor improvements to first start from LXC
+
+###2023.10.10
+- Add checkbox for conversion to correct storage backing type to container creation from template
+
+###2023.10.04
+- Changed LXC start/stop routine on Array start/stop - thanks for the report to forums user Joly0
+- Fixed typo in Helptexts
+- Added buttons to LXC page to Start, Stop, Freeze, Unfreeze all containers
+
+###2023.10.03a &amp; 20.23.10.03b
+- Minor visual bugfixes for 'lxc-dirtozfs'
+
+###2023.10.03
+- Reworked sorting IP addresses from containers on LXC page to display IPv4 first, IPv4 Docker (starting with 172.) second, IPv6 third
+- Delete parent container dataset when destroying container (only applies when using ZFS backing storage type)
+- Updated Helptexts on Settings page
+- Added 'lxc-dirtobtrfs' this allows your to convert your Directory based containers to BTRFS from the command line (experimental)
+- Added 'lxc-dirtozfs' this allows your to convert your Directory based containers to ZFS from the command line (experimental)
+
+###2023.09.30
+- Added help to Settings pages
+
+###2023.09.28a
+- Initial support for ZFS and BTRFS backing storage types (experimental - defaults to directory). Already existing containers will be still using directory as backing storage type. Please visit the Settings page from LXC to change the backing storage type.
+- Overhauled creating Snapshots and Backups from container alongside with Destroy container to give more output if something went wrong.
+
+###2023.09.28
+- Bugfix for lxc_autobackup, allow . in new container names
+- Bugfix for container creation from template
+
+###2023.09.27
+- Added missing OS icons for OpenEuler and Slackware
+
+###2023.09.26
+- Overhauled the event scripts for Array start and stop
+
+###2023.09.25
+- Display warning text on LXC Settings page only when FUSE file path is selected
+- Few minor visual changes
+- Change in how directories are created
+- It is now possible to specify a GitHub token in the plugin.cfg file
+
+###2023.09.23
+- Remove wrong set symlink if found
+
+###2023.09.21
+- Display Memory usage from Containers on LXC page (experimental)
+
+###2023.09.15
+- Fixed visual bug in context menu
+
+###2023.09.14
+- Add Description field to Add Container, Restore from Snapshot, Restore from Backup and Copy container
+- Add support for Donation and Support links
+- Visual improvements
+
+###2023.09.13
+- Allow 50 characters for descriptions
+- Minor bugfixes
+
+###2023.09.12
+- Code cleanup
+
+###2023.09.11
+- Rewrote template routine to support installation from premade LXC container archives from GitHub repositories
+
+###2023.08.22
+- Code cleanup
+- Minor visual improvements
+- Initial template support
+
+###2023.08.21
+- Add checkbox to start container after creation on Add Container page
+- Uncheck autostart checkbox by default on Add Container page
+
+###2023.08.20
+- Catch errors for create container, display and output them to syslog
+- Catch errros for start container, display and output them to syslog
+- Improved restart function
+- Minor visual improvements and updates
+
+###2023.08.17
+- Allow bond and eth as interfaces on Settings page
+- Sort interfaces on Settings page to show the most relevant interface as fist in the drop down
+- Disable checkbox to change container networks if Array is stopped
+- Few visual fixes/improvements
+- Code cleanup
+
+###2023.08.12
+- Create checkbox to change container networks too if network is changed on the settings page (this will change the network from all containers if checked)
+- Change net.0type to macvlan and add net.0macvlan.mode bridge to if vhost interface is selected
+- Show only br, vhost and virbri as available interfaces
+
+###2023.08.11
+- Show containers with faulty config too if there is only one container installed
+- Show more interfaces in settings
+- Bugfix for updates on LXC page
+- Bugfix for pattern from LXC URL
+
+###2023.08.10
+- Show containers which have a broken config file on LXC page
+- Fix some php warnings
+
+###2023.08.06
+- Bugfix for autostart on boot not working correctly with the new global backup settings
+- Minor improvements to disk unmount script
+
+###2023.08.03b
+- Fixed bug backups not showing up correctly on Backup page when certain symbols are used in the container name
+
+###2023.08.03a
+- Fixed bug where backups are not showing on Backup page
+- Added additional check to lxc-autobackup if backup path is set to LXC path
+
+###2023.08.03
+- Added Backups tab on LXC page, only visible when global backup configuration is enabled and configured properly
+- Few minor visual tweaks
+
+###2023.08.02a
+- Moved LXC to System Settings
+- Change logo for LXC on settings page
+- Allow override with command line options from global configuration for lxc-autobackup
+- Few minor visual changes
+
+###2023.08.02
+- Split config page into individual pages
+- Added global configuration for lxc-autobackup (see LXC Settings page)
+- Minor bugfixes
+
+###2023.07.31
+- Bugfix in 'lxc-autobackup' for certain parameters not working if a mix of them is used
+
+###2023.07.30
+- Added 'lxc-autobackup' to easily create scheduled tar.xz backups with User Scripts plugin, for more information issue: 'lxc-autobackup from a unRAID terminal
+- Display messages when taking a snapshot with 'lxc-autosnapshot'
+
+###2023.07.29
+- Added 'lxc-autosnapshot' to easily create scheduled snapshots with User Scripts plugin, for more information issue: 'lxc-autosnapshot' from a unRAID terminal
+- Removed Create VNC container
+- Bugfix for Address and Total RX/TX indicators on LXC page
+
+###2023.07.08
+- Added ability to change download URL from LXC Containers
+
+###2023.07.06
+- Added icon and container numbers to Dashbaord tile
+
+###2023.06.16
+- Added ability to use [IP] in the WebUI URL, the container will then use the IP from the container instead of [IP] (if the container has more then one IP it will use the first one shown on the LXC page eg: http://[IP]:8080 will translate into http://192.168.0.100:8080 in this case the first container IP is 192.168.0.100).
+
+###2023.05.17
+- Show icon and text for LXC on Azure and Grey theme instead of text only
+
+###2023.05.12
+- Pull index for container images from images.linuxcontainers.org and present them as drop downs on Add Container page, fallback to text inputs if pull from index fails
+
+###2023.05.09
+- Added context menu entry to add a WebUI URL
+- Removed "Remove Description" button from context menu. To remove the description open the "Change Description" dialogue and leave it empty.
+- Bugfix for LXC page to show table as zebra striped - thank you S3ppo
+- Added a function to remove custom icons if one is found when destroying a container - this function is disabled for now
+
+###2023.04.24
+- Added real time stats for IP addresses and network traffic
+
+###2023.04.20
+- Bugfix for flickering context menu
+- Added spinner to Start, Stop, Restart, Freeze and Kill operations
+- Changed desription alert box to unRAID default
+- Minor style changes
+
+###2023.04.18
+- Initial support for custom LXC container icons - to apply a custom icon to a LXC container create a folder in the lxc.path named "custom-icons" and place your custom icon(s) named after the LXC container (case sensitive) in there, only .png files are supported
+- Initial support for WebUI links - append "#container_webui=http://IP:PORT" (eg: #container_webui=http://192.168.1.1:8080) to the LXC container config to get a WebGUI button in the context menu for the LXC container
+- Added Restart button to context menus for running containers
+
+###2023.04.12a
+- Fix for Dashbaord page
+
+###2023.04.12
+- Added questionmark icon for not known distributions
+- Added NixOS icon
+- Removed Readme tab
+
+###2023.03.23
+- Fixed issue where LXC containers where not stopped when disabling the service
+- Hide LXC from Dashboard if service is not enabled
+
+###2023.03.08a
+- Added class to Autostart switches
+
+###2023.03.08
+- Fixed issue where notification bell was not shown on LXC and Dashboard page - unRAID 6.12+
+- Fixed issue where switches on Dashboard stopped working - unRAID 6.12+
+
+###2023.03.04
+- Bugfix for function Delete Description
+
+###2023.03.03a
+- changed naming from container states to be conform with unRAID
+
+###2023.03.03
+- Added status icon for pause to Dashboard
+- Added icons to status on LXC page and adjusted size
+
+###2023.03.02
+- Added Dashboard tile for unRAID 6.12+ - huge shout out to s3ppo from the unRAID Forums
+- Removed unnecessary text from LXC page if no container is installed
+
+###2023.02.22
+- Added configuration location to Show Config
+
+###2023.02.21
+- Description can now be added to containers - max 40 alphanumeric characters
+- Removed cgroup v1/v2 detection
+- Bugfix header spaceing
+
+###2022.12.11
+- Bugfix remove header and tab spacing - thank you jmztaylor
+- Bugfix for container releases with single character
+
+###2022.09.01
+- Bugfix for autostart delay event script
+- Bugfix for autostart delay line injection into config
+
+###2022.08.31
+- Added delay option on settings page for when the Array is started - defaults to 10 seconds
+
+###2022.08.29
+- Visual improvements on LXC page - thank you S3ppo from the unRAID Forums
+
+###2022.08.28b
+- Visual improvements on LXC page
+
+###2022.08.28a
+- Bugfix show all IPs instead of last one
+- Bugfix hide Kernel/Memory usage when using cgroup v2
+- Visual improvements
+
+###2022.08.28
+- Added Drop-Down and Autostart switch - huge shout out to jmztaylor from the unRAID Forums
+- Visual improvements
+
+###2022.08.27
+- Complete overhaul from the codebase - huge shout out to jmztaylor from the unRAID Forums
+
+###2022.07.23
+- Bugfix when using dark theme filetree wasn't visible on settings page - thank you SimonF
+
+###2022.07.16
+- Bugfix that prevented Array from starting when using /mnt/user/... as data directory (it is recommended to use the real file path like /mnt/cache/... or /mnt/diskX/...!)
+
+###2022.07.12
+- Added Copy feature to the plugin - huge shout out to jmztaylor from the unRAID forums
+- Added Dialogue to prevent php timeout while creating Snapshots from big containers - huge shout out to jmztaylor from the unRAID forums
+- Added and unified LXC messages in syslog
+- Bugfix that prevented Array from stopping at certain conditions
+- Fixed few typos
+
+###2022.07.10
+- Added Snapshot feature to the plugin - huge shout out to jmztaylor from the Unraid forums
+
+###2022.06.09a
+- Added Distribution Logos
+- Moved link to show container configuration from container Name to the Distribution Logo
+
+###2022.06.09
+- Bugfix in VNC automatic install script showing wrong default user password at the end
+
+###2022.06.08
+- Added automatic installation from Debian Bullseye Desktop VNC container
+
+###2022.05.26
+- Added Terminal button to LXC page - Unraid 6.10.1-rc2 required
+
+###2022.05.24a
+- Small cosmetic modification to Add Container page
+
+###2022.05.24
+- Cleanup and a few changes to the appearance
+- Changed support link
+
+###2022.05.23a
+- Don't create default LXC directory on first plugin install
+
+###2022.05.23
+- Made path for LXC on settings page required
+
+###2022.05.21
+- Fixed destroy of running containers was not working
+- Forbid spaces in container, distirbuiton and release names
+- Moved plugin icon back from System Settings to User Utilities
+
+###2022.05.20
+- Added Timeout option to settings page
+- Lowered initial timeout from 30 to 15 seconds
+- Fixed stopped containers starting when clicking on Update on the Settings page
+- Plugin now links to Settings page instead to LXC pge
+- Moved plugin icon from User Utilities to System Settings
+- Renamed LXC Settings to LXC on Settings page
+
+###2022.05.19a
+- MAC Address translated to upper case if letters if input is lower case
+- Added Show configuration file when clicking on container name
+
+###2022.05.19
+- Added Start/Stop/Kill/Freeze/Unfreeze buttons
+- Added Autostart Enable/Disable button
+- Added Destroy container button
+
+###2022.05.18
+- Added warning about the LXC path
+- Added created Add Container page
+- Added container information on the LXC page
+- Warning from boot screen hidden
+
+###2022.05.12
+- Initial release
+
+</CHANGES>
+
+<FILE Run="/bin/bash">
+<INLINE>
+rm -f $(ls &plugin;/&name;*.txz 2>/dev/null|grep -v '&version;')
+</INLINE>
+</FILE>
+
+<FILE Name="&plugin;/&name;-&version;.txz" Run="upgradepkg --install-new">
+<URL>&gitURL;/packages/&name;-&version;.txz</URL>
+<MD5>&md5;</MD5>
+</FILE>
+
+<FILE Name="&emhttp;/README.md">
+<INLINE>
+**LXC**
+
+LXC is a well-known Linux container runtime that consists of tools, templates, and library and language bindings. It's pretty low level, very flexible and covers just about every containment feature supported by the upstream kernel.
+LXC is similar to Docker but with a key difference: while Docker abstracts away much of the system maintenance, LXC gives users greater control and responsibility over managing their environments. This allows for more customization and fine-tuning, making it ideal for users who prefer a hands-on approach.
+</INLINE>
+</FILE>
+
+<FILE Run="/bin/bash">
+<INLINE>
+
+#Create setting files if not found
+if [ ! -f "&plugin;/plugin.cfg" ]; then
+  echo 'SERVICE=disabled
+BDEVTYPE=dir
+TIMEOUT=15
+AUTOSTART_DELAY=10
+DYNAMIC_STATS=enabled
+LXC_CONTAINER_URL=images.linuxcontainers.org
+LXC_BACKUP_SERVICE=disabled
+LXC_BACKUP_PATH=
+LXC_BACKUP_KEEP=
+LXC_BACKUP_THREADS=
+LXC_BACKUP_COMPRESSION=
+LXC_BACKUP_USE_SNAPSHOT=
+LXC_GITHUB_USER=
+LXC_GITHUB_TOKEN=' > "&plugin;/plugin.cfg"
+fi
+
+#Add AUTOSTART_DELAY entry if not exists
+grep -q "AUTOSTART_DELAY=" &plugin;/plugin.cfg || echo "AUTOSTART_DELAY=10" &gt;&gt; &plugin;/plugin.cfg
+
+#Add LXC_CONTAINER_URL entry if not exists
+grep -q "LXC_CONTAINER_URL=" &plugin;/plugin.cfg || echo "LXC_CONTAINER_URL=images.linuxcontainers.org" &gt;&gt; &plugin;/plugin.cfg
+
+#Add LXC_BACKUP_SERVICE entry if not exists
+grep -q "LXC_BACKUP_SERVICE=" &plugin;/plugin.cfg || echo "LXC_BACKUP_SERVICE=disabled" &gt;&gt; &plugin;/plugin.cfg
+
+#Add LXC_BACKUP_PATH entry if not exists
+grep -q "LXC_BACKUP_PATH=" &plugin;/plugin.cfg || echo "LXC_BACKUP_PATH=" &gt;&gt; &plugin;/plugin.cfg
+
+#Add LXC_BACKUP_KEEP entry if not exists
+grep -q "LXC_BACKUP_KEEP=" &plugin;/plugin.cfg || echo "LXC_BACKUP_KEEP=" &gt;&gt; &plugin;/plugin.cfg
+
+#Add LXC_BACKUP_THREADS entry if not exists
+grep -q "LXC_BACKUP_THREADS=" &plugin;/plugin.cfg || echo "LXC_BACKUP_THREADS=" &gt;&gt; &plugin;/plugin.cfg
+
+#Add LXC_BACKUP_COMPRESSION entry if not exists
+grep -q "LXC_BACKUP_COMPRESSION=" &plugin;/plugin.cfg || echo "LXC_BACKUP_COMPRESSION=" &gt;&gt; &plugin;/plugin.cfg
+
+#Add LXC_BACKUP_USE_SNAPSHOT entry if not exists
+grep -q "LXC_BACKUP_USE_SNAPSHOT=" &plugin;/plugin.cfg || echo "LXC_BACKUP_USE_SNAPSHOT=" &gt;&gt; &plugin;/plugin.cfg
+
+#Add LXC_GITHUB_USER entry if not exists
+grep -q "LXC_GITHUB_USER=" &plugin;/plugin.cfg || echo "LXC_GITHUB_USER=" &gt;&gt; &plugin;/plugin.cfg
+
+#Add LXC_GITHUB_TOKEN entry if not exists
+grep -q "LXC_GITHUB_TOKEN=" &plugin;/plugin.cfg || echo "LXC_GITHUB_TOKEN=" &gt;&gt; &plugin;/plugin.cfg
+
+#Add BDEVTYPE entry if not exists
+grep -q "BDEVTYPE=" &plugin;/plugin.cfg || echo "BDEVTYPE=dir" &gt;&gt; &plugin;/plugin.cfg
+
+#Add DYNAMIC_STATS entry if not exists
+grep -q "DYNAMIC_STATS=" &plugin;/plugin.cfg || echo "DYNAMIC_STATS=enabled" &gt;&gt; &plugin;/plugin.cfg
+
+if [ ! -f "&plugin;/lxc.conf" ]; then
+  echo 'lxc.lxcpath=/mnt/user/lxc' > "&plugin;/lxc.conf"
+fi
+
+if [ ! -f "&plugin;/default.conf" ]; then
+  echo 'lxc.net.0.type = veth
+lxc.net.0.flags = up
+lxc.net.0.link = br0
+lxc.net.0.name = eth0' > "&plugin;/default.conf"
+fi
+
+#Create packages directory
+if [ ! -d &plugin;/packages ]; then
+  mkdir -p &plugin;/packages
+fi
+
+#Version check, set build index depending on unRAID version
+TARGET_V="6.12.99"
+COMPARE="$(cat /etc/unraid-version | cut -d '=' -f2 | cut -d '"' -f2)
+$TARGET_V"
+if [ "$TARGET_V" != "$(echo "$COMPARE" | sort -V | tail -1)" ]; then
+  BUILD_IDX="2"
+else
+  BUILD_IDX="1"
+fi
+
+#Set variables and get version numbers
+LXC_DATADIRECTORY="$(cat &plugin;/lxc.conf | grep -n "lxc.lxcpath" | cut -d '=' -f2 | sed 's/\"//g')"
+LXC_SERVICE="$(cat &plugin;/plugin.cfg | grep -nw "SERVICE" | cut -d '=' -f2 | sed 's/\"//g')"
+LAT_V="$(wget -qO- https://api.github.com/repos/ich777/unraid-lxc-plugin/releases/latest | jq -r '.tag_name')"
+CUR_V="$(ls &plugin;/packages/LXC-*-${BUILD_IDX}.txz | sort -V | tail -1 | cut -d '-' -f2)"
+DL_URL="https://github.com/ich777/unraid-lxc-plugin/releases/download/$LAT_V"
+
+if [ -z "${LAT_V}" ]; then
+  if [ -z "${CUR_V}" ]; then
+    echo "---Something went horribly wrong, can't get latest version from LXC and no local version found!---"
+    removepkg &name;-&version;.txz
+    rm -rf &plugin;
+    exit 1
+  else
+    LAT_V=${CUR_V}
+  fi
+fi
+
+#Check for old packages
+rm -f $(ls &plugin;/packages/LXC-*.txz 2>/dev/null | grep -v "$LAT_V")
+rm -f $(ls &plugin;/packages/LXC-*.txz 2>/dev/null | grep -v "\-$BUILD_IDX")
+
+download() {
+#Download LXC package
+if wget -q -nc --show-progress --progress=bar:force:noscroll -O "&plugin;/packages/LXC-${LAT_V}-${BUILD_IDX}.txz" "${DL_URL}/LXC-${LAT_V}-${BUILD_IDX}.txz" ; then
+  if [ "$(md5sum "&plugin;/packages/LXC-${LAT_V}-${BUILD_IDX}.txz" | cut -d ' ' -f1)" != "$(wget -qO- "${DL_URL}/LXC-${LAT_V}-${BUILD_IDX}.txz.md5" | cut -d ' ' -f1)" ]; then
+    echo
+    echo "---CHECKSUM ERROR!---"
+    removepkg &name;-&version;.txz
+    rm -rf &plugin;
+    exit 1
+  fi
+  echo
+  echo "---Successfully downloaded LXC Package, installing...---"
+else
+  echo
+  echo "--------------Can't download LXC Package----------------"
+  exit 1
+fi
+}
+
+check() {
+if [ ! -f "&plugin;/packages/LXC-${LAT_V}-${BUILD_IDX}.txz" ]; then
+  echo
+  echo "---------------Downloading LXC Package!-----------------"
+  echo "------------Please don't close this window!-------------"
+  download
+else
+  echo
+  echo "--------LXC Package found locally, installing...--------"
+fi
+}
+
+install() {
+#Install LXC Package
+/sbin/installpkg "&plugin;/packages/LXC-${LAT_V}-${BUILD_IDX}.txz"
+ln -s &plugin;/default.conf /etc/lxc/default.conf
+ln -s &plugin;/lxc.conf /etc/lxc/lxc.conf
+}
+
+enable_lxc() {
+rm -rf /var/cache/lxc
+if [ ! -d ${LXC_DATADIRECTORY}/cache ]; then
+  mkdir -p ${LXC_DATADIRECTORY}/cache
+fi
+ln -s ${LXC_DATADIRECTORY}/cache/ /var/cache/lxc
+}
+
+#Check if LXC Package is already downloaded
+check
+if [ "$(lxc-start --version 2>/dev/null)" != "${LAT_V}" ]; then
+  install > /dev/null
+  if [ "${LXC_SERVICE}" == "enabled" ]; then
+    if [ ! -z "$(pidof emhttpd)" ]; then
+      enable_lxc
+    fi
+  fi
+fi
+
+#Make LXC RAM usage script executable when service is enabled
+if [ "${LXC_SERVICE}" == "enabled" ]; then
+  chmod 755 &emhttp;/system/LXC
+else 
+  chmod 644 &emhttp;/system/LXC
+fi
+
+#Change download URL based on settings file entry
+LXC_CONT_URL=$(cat &plugin;/plugin.cfg | grep "LXC_CONTAINER_URL" | cut -d '=' -f2 | sed 's/\"//g')
+sed -i "/^DOWNLOAD_SERVER=\"*/c\DOWNLOAD_SERVER=\"${LXC_CONT_URL}\"" /usr/share/lxc/templates/lxc-download
+
+#Create symlink for lxc-autosnapshot if not exists
+if [ ! -L /usr/bin/lxc-autosnapshot ]; then
+  ln -s /usr/local/emhttp/plugins/lxc/lxc_scripts/lxc-autosnapshot /usr/bin/lxc-autosnapshot
+fi
+
+#Create symlink for lxc-autobackup if not exists
+if [ ! -L /usr/bin/lxc-autobackup ]; then
+  ln -s /usr/local/emhttp/plugins/lxc/lxc_scripts/lxc-autobackup /usr/bin/lxc-autobackup
+fi
+
+#Create symlink for lxc-dirtobtrfs if not exists
+if [ ! -L /usr/bin/lxc-dirtobtrfs ]; then
+  ln -s /usr/local/emhttp/plugins/lxc/lxc_scripts/lxc-dirtobtrfs /usr/bin/lxc-dirtobtrfs
+fi
+
+#Create symlink for lxc-dirtozfs if not exists
+if [ ! -L /usr/bin/lxc-dirtozfs ]; then
+  ln -s /usr/local/emhttp/plugins/lxc/lxc_scripts/lxc-dirtozfs /usr/bin/lxc-dirtozfs
+fi
+
+#Remove wrong set symlink if found
+if [ -d ${LXC_DATADIRECTORY}/cache/cache ]; then
+  rm -rf ${LXC_DATADIRECTORY}/cache/cache
+fi
+
+#Make sure temporary directory for LXC exists
+if [ ! -d /tmp/lxc/containers ]; then
+  mkdir -p /tmp/lxc/containers
+fi
+
+echo "---------------LXC installation complete!---------------"
+
+</INLINE>
+</FILE>
+
+<FILE Run="/bin/bash" Method="remove">
+<INLINE>
+
+echo "------------------------------"
+echo "---Uninstalling LXC Package---"
+echo "------------------------------"
+# Remove plugin related files
+removepkg &name;-&version;
+rm -rf &plugin;
+rm /usr/bin/lxc-autosnapshot /usr/bin/lxc-autobackup /usr/bin/lxc-dirtobtrfs /usr/bin/lxc-dirtozfs
+echo
+echo "------------------------------------------------------------------------------"
+echo "-------------LXC Package uninstalled, please reboot your server!--------------"
+echo "------------------------------------------------------------------------------"
+echo
+
+</INLINE>
+</FILE>
+</PLUGIN>
